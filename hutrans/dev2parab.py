@@ -17,7 +17,7 @@ import warnings
 import numpy as np
 
 from ._decode import viterbi
-from converter_indic import wxConvert
+from wxconv import WXC as wxConvert
 
 warnings.filterwarnings("ignore")
 
@@ -38,9 +38,9 @@ class DP_Transliterator():
 
         #load models
         sys.path.append('%s/_utils' %dist_dir)
-        self.coef_            = np.load('%s/models/hu_coef.npy' %dist_dir)[0]
-        self.classes_         = np.load('%s/models/hu_classes.npy' %dist_dir)[0]
-        self.vectorizer_      = np.load('%s/models/hu_sparse-vec.npy' %dist_dir)[0]
+        self.coef_            = np.load('%s/models/hu_coef.npy' %dist_dir, allow_pickle=True, encoding='latin1')[0]
+        self.classes_         = np.load('%s/models/hu_classes.npy' %dist_dir, allow_pickle=True, encoding='latin1')[0]
+        self.vectorizer_      = np.load('%s/models/hu_sparse-vec.npy' %dist_dir, allow_pickle=True, encoding='latin1')[0]
         self.intercept_init_  = np.load('%s/models/hu_intercept_init.npy' %dist_dir)
         self.intercept_trans_ = np.load('%s/models/hu_intercept_trans.npy' %dist_dir)
         self.intercept_final_ = np.load('%s/models/hu_intercept_final.npy' %dist_dir)
@@ -48,15 +48,14 @@ class DP_Transliterator():
         #initialize character maps  
         self.letters = set(string.ascii_letters)
         self.mask_roman = re.compile(r'([a-zA-Z]+)')
-        self.rom_dev = re.compile(ur'([a-zA-Z])([\u0900-\u097f])')
-        self.dev_rom = re.compile(ur'([\u0900-\u097f])([a-zA-Z])')
+        self.rom_dev = re.compile(r'([a-zA-Z])([\u0900-\u097f])')
+        self.dev_rom = re.compile(r'([\u0900-\u097f])([a-zA-Z])')
         self.non_alpha = re.compile(r"([^a-zA-Z%s]+)" %(self.esc_ch))
 
         #initialize punctuation map table
         self.punkt_tbl = dict()
-        with open('%s/mapping/punkt.map' %dist_dir) as punkt_fp:
+        with open('%s/mapping/punkt.map' %dist_dir, encoding='utf-8') as punkt_fp:
             for line in punkt_fp:
-                line = line.decode('utf-8')
                 s,t = line.split()
                 if s in ["'", '"']: 
                     continue
@@ -65,13 +64,13 @@ class DP_Transliterator():
     def feature_extraction(self, letters):
         ngram = 4
         out_letters = list()
-        dummies = ["_"] * ngram
+        dummies = [b"_"] * ngram
         context = dummies + letters + dummies
         for i in range(ngram, len(context)-ngram):
             unigrams  = context[i-ngram: i] + [context[i]] + context[i+1: i+(ngram+1)]
-            bigrams   = ["%s|%s" % (p,q) for p,q in zip(unigrams[:-1], unigrams[1:])]
-            trigrams  = ["%s|%s|%s" % (r,s,t) for r,s,t in zip(unigrams[:-2], unigrams[1:], unigrams[2:])]
-            quadgrams = ["%s|%s|%s|%s" % (u,v,w,x) for u,v,w,x in zip(unigrams[:-3], unigrams[1:], unigrams[2:], unigrams[3:])]
+            bigrams   = [p + b'|' + q for p,q in zip(unigrams[:-1], unigrams[1:])]
+            trigrams  = [p + b'|' + q + b'|' + r for p,q,r in zip(unigrams[:-2], unigrams[1:], unigrams[2:])]
+            quadgrams = [p + b'|' + q + b'|' + r + b'|' + s for p,q,r,s in zip(unigrams[:-3], unigrams[1:], unigrams[2:], unigrams[3:])]
             ngram_context = unigrams + bigrams + trigrams + quadgrams
             out_letters.append(ngram_context)
 
@@ -84,7 +83,7 @@ class DP_Transliterator():
                            self.intercept_init_, self.intercept_final_)
 
         y = [self.classes_[pid] for pid in y]
-        y = ''.join(y)
+        y = b''.join(y).decode('utf-8')
 
         return y.replace('_', '')
 
@@ -101,20 +100,19 @@ class DP_Transliterator():
         return op_word
 
     def transliterate(self, text):
-        if isinstance(text, str):
+        if isinstance(text, bytes):
             text = text.decode('utf-8')
         trans_list = list()
         text = self.rom_dev.sub(r'\1 \2', text)
         text = self.dev_rom.sub(r'\1 \2', text)
         text = self.mask_roman.sub(r'%s\1' %(self.esc_ch), text)
         text = self.con.convert(text) # Convert to wx
-        text = text.decode('utf-8') 
         text = text.replace('\t', self.tab)
         text = text.replace(' ', self.space)
         lines = text.split("\n")
         for line in lines:
             if not line.strip():
-                trans_list.append(line.encode('utf-8'))
+                trans_list.append(line)
                 continue
             trans_line = str()
             line = self.non_alpha.split(line)
@@ -123,11 +121,9 @@ class DP_Transliterator():
                     continue
                 elif word[0] == self.esc_ch:
                     word = word[1:]
-                    word = word.encode('utf-8')
                     trans_line += word
                 elif word[0] not in self.letters:
                     punkt_trans = word.translate(self.punkt_tbl)
-                    punkt_trans = punkt_trans.encode('utf-8')
                     trans_line += punkt_trans
                 else:
                     op_word = self.case_trans(word)
